@@ -22,6 +22,65 @@ const blackPuniChance = 0.005;
 let cells = [];
 const pendingTimers = new Set();
 let celebration = null;
+const activePresses = new Map();
+
+function cellAtPoint(x, y) {
+  const rect = board.getBoundingClientRect();
+  const column = Math.floor((x - rect.left) / rect.width * columns);
+  const row = Math.floor((y - rect.top) / rect.height * rows);
+  return column >= 0 && column < columns && row >= 0 && row < rows ? row * columns + column : -1;
+}
+
+function releasePress(pointerId) {
+  const press = activePresses.get(pointerId);
+  if (!press) return;
+  activePresses.delete(pointerId);
+  press.bubble.classList.remove('pressing');
+  if (board.hasPointerCapture(pointerId)) board.releasePointerCapture(pointerId);
+}
+
+function cancelPresses() {
+  for (const pointerId of [...activePresses.keys()]) releasePress(pointerId);
+}
+
+board.addEventListener('pointerdown', event => {
+  if (event.button !== 0) return;
+  const index = cellAtPoint(event.clientX, event.clientY);
+  if (index < 0 || cells[index].bubble.disabled) return;
+  const cell = cells[index];
+  if ([...activePresses.values()].some(press => press.bubble === cell.bubble)) return;
+  event.preventDefault();
+  activePresses.set(event.pointerId, {
+    index, bubble: cell.bubble, version: cell.version, x: event.clientX, y: event.clientY
+  });
+  board.setPointerCapture(event.pointerId);
+  cell.bubble.classList.remove('reviving');
+  cell.bubble.classList.add('pressing');
+  playPop(cell.isBlack ? 'black' : cell.hue, true);
+});
+
+board.addEventListener('pointermove', event => {
+  const press = activePresses.get(event.pointerId);
+  if (!press) return;
+  // 指を大きくずらしたときは、潰さずに元の形へ戻します。
+  if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > 22) releasePress(event.pointerId);
+});
+
+board.addEventListener('pointerup', event => {
+  const press = activePresses.get(event.pointerId);
+  if (!press) return;
+  event.preventDefault();
+  releasePress(event.pointerId);
+  const cell = cells[press.index];
+  if (cell.version !== press.version || cell.bubble.disabled || cellAtPoint(event.clientX, event.clientY) !== press.index) return;
+  popBubble(cell.bubble, press.index);
+  // 対応する端末だけ、ごく短い振動を加えます。
+  try { if (typeof navigator.vibrate === 'function') navigator.vibrate(cell.isBlack ? [12, 20, 18] : 9); } catch {}
+});
+board.addEventListener('pointercancel', event => releasePress(event.pointerId));
+board.addEventListener('lostpointercapture', event => releasePress(event.pointerId));
+window.addEventListener('blur', cancelPresses);
+document.addEventListener('visibilitychange', () => { if (document.hidden) cancelPresses(); });
 
 function celebrateTen() {
   if (celebration) return;
@@ -232,7 +291,7 @@ const colorSounds = {
   25:  { frequency: 247, type: 'triangle', duration: .09, cutoff: 2800 }
 };
 
-function playPop(hue) {
+function playPop(hue, pressing = false) {
   if (!soundEnabled) return;
   try {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -241,34 +300,36 @@ function playPop(hue) {
     if (audioContext.state === 'suspended') void audioContext.resume().catch(() => {});
     const sound = colorSounds[hue] || colorSounds[0];
     const now = audioContext.currentTime;
-    const duration = 0.065;
+    const duration = pressing ? .04 : .095;
     const buffer = audioContext.createBuffer(1, Math.ceil(audioContext.sampleRate * duration), audioContext.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < data.length; i++) {
-      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 5);
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 3);
     }
     const source = audioContext.createBufferSource();
     const filter = audioContext.createBiquadFilter();
     const gain = audioContext.createGain();
     source.buffer = buffer;
     filter.type = 'lowpass';
-    filter.frequency.value = sound.cutoff;
-    gain.gain.value = 0.32;
+    filter.frequency.setValueAtTime(sound.cutoff, now);
+    filter.frequency.exponentialRampToValueAtTime(Math.max(180, sound.cutoff * .18), now + duration);
+    gain.gain.value = pressing ? .025 : .32;
     source.connect(filter).connect(gain).connect(audioContext.destination);
     source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
     source.start(now);
     const tone = audioContext.createOscillator();
     const toneGain = audioContext.createGain();
     tone.type = sound.type;
-    tone.frequency.setValueAtTime(sound.frequency * 1.6, now);
-    tone.frequency.exponentialRampToValueAtTime(sound.frequency, now + .035);
+    tone.frequency.setValueAtTime(sound.frequency * (pressing ? .8 : 1.6), now);
+    tone.frequency.exponentialRampToValueAtTime(sound.frequency * (pressing ? .55 : .65), now + .065);
+    const toneDuration = pressing ? .085 : sound.duration;
     toneGain.gain.setValueAtTime(0, now);
-    toneGain.gain.linearRampToValueAtTime(.18, now + .004);
-    toneGain.gain.exponentialRampToValueAtTime(.001, now + sound.duration);
+    toneGain.gain.linearRampToValueAtTime(pressing ? .045 : .18, now + .004);
+    toneGain.gain.exponentialRampToValueAtTime(.001, now + toneDuration);
     tone.connect(toneGain).connect(audioContext.destination);
     tone.onended = () => { tone.disconnect(); toneGain.disconnect(); };
     tone.start(now);
-    tone.stop(now + sound.duration + .01);
+    tone.stop(now + toneDuration + .01);
   } catch {
     // 音が使えない環境でもゲームは続けられます。
   }
@@ -276,6 +337,10 @@ function playPop(hue) {
 
 function popBubble(bubble, index, depth = 0, cascade = { celebrated: false }) {
   if (bubble.disabled) return;
+  for (const [id, press] of activePresses) {
+    if (press.bubble === bubble) releasePress(id);
+  }
+  bubble.classList.remove('reviving');
   bubble.disabled = true;
   bubble.classList.add('popped');
   bubble.setAttribute('aria-label', `${index + 1}番目：つぶれています`);
@@ -304,6 +369,7 @@ function popBubble(bubble, index, depth = 0, cascade = { celebrated: false }) {
 }
 
 function startGame() {
+  cancelPresses();
   pendingTimers.forEach(timer => window.clearTimeout(timer));
   pendingTimers.clear();
   cells = [];
@@ -326,7 +392,11 @@ function startGame() {
     const cell = { bubble, damage: 0, version: 0 };
     randomizeCell(cell, index);
     cells.push(cell);
-    bubble.addEventListener('click', () => popBubble(bubble, index));
+    bubble.addEventListener('click', event => {
+      // タッチ・マウスはpointerupで処理。キーボード操作は通常のclickを使います。
+      if ('PointerEvent' in window && event.detail !== 0) return;
+      popBubble(bubble, index);
+    });
     board.appendChild(bubble);
   }
 }
@@ -334,11 +404,9 @@ function startGame() {
 // 丸の間の小さな余白も、そのマスのプチプチとして押せます。
 board.addEventListener('click', event => {
   if (event.target !== board) return;
-  const rect = board.getBoundingClientRect();
-  const column = Math.floor((event.clientX - rect.left) / rect.width * columns);
-  const row = Math.floor((event.clientY - rect.top) / rect.height * rows);
-  if (column < 0 || column >= columns || row < 0 || row >= rows) return;
-  const index = row * columns + column;
+  if ('PointerEvent' in window) return;
+  const index = cellAtPoint(event.clientX, event.clientY);
+  if (index < 0) return;
   popBubble(cells[index].bubble, index);
 });
 
