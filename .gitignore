@@ -1,0 +1,10 @@
+# パソコンが自動生成するファイル
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ローカル作業用
+node_modules/
+*.log
+.env
+.env.*

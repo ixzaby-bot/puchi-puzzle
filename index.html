@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#eaf6f4">
+  <meta name="description" content="64個のカラフルなプチプチを、音と連鎖で楽しむ無料ブラウザゲーム。自動復活でずっと遊べます。スマートフォンにも対応。">
+  <title>ぷちぷち日和</title>
+  <link rel="stylesheet" href="./style.css">
+  <script src="./script.js" defer></script>
+</head>
+<body contenteditable="false">
+  <main class="game">
+    <header>
+      <p class="eyebrow">A LITTLE BREAK</p>
+      <h1>ぷちぷち日和<span aria-hidden="true">。</span></h1>
+      <p class="description">ひとつずつ、ぷちっ。気分も、すっきり。</p>
+    </header>
+
+    <section class="play-area" aria-label="プチプチゲーム">
+      <div class="toolbar">
+        <p class="counter">合計 <strong id="count">0</strong><span> ぷちっ</span></p>
+        <button id="sound" class="sound-button" type="button" aria-pressed="true">♪ 音 ON</button>
+      </div>
+      <div id="board" class="board" aria-label="8行8列、64個のプチプチ"></div>
+      <div class="progress" role="progressbar" aria-label="復活を待っているプチプチの数" aria-valuemin="0" aria-valuemax="64" aria-valuenow="0"><div id="progress-fill"></div></div>
+    </section>
+
+    <div class="result" aria-live="polite" aria-atomic="true">
+      <p id="message">自動で復活する、無限ぷちぷち！</p>
+      <button id="reset" class="reset-button" type="button">↻ カウントをリセット</button>
+    </div>
+    <footer>64個のプチプチが、約2.5秒で自動復活。<br>上下左右に色が飛び散り、ダメージ3つで連鎖！<br>✦ 黒ぷには、斜めも含めた周囲8マスを一気にぷちっ！</footer>
+  </main>
+</body>
+</html>
